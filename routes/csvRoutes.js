@@ -17,23 +17,40 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     }
 
     const records = [];
+    const uniqueRecords = new Set();
+
     fs.createReadStream(req.file.path)
-      .pipe(csv())
+      .pipe(
+        csv({
+          mapHeaders: ({ header }) => header.trim(), // Normaliza os cabeçalhos
+        })
+      )
       .on("data", (row) => {
-        // Verifica se os campos necessários estão presentes e válidos
-        if (row.name && row.age && row.email) {
-          records.push({
-            name: row.name,
-            age: parseInt(row.age, 10), // Converte 'age' para número
-            email: row.email,
-          });
-        } else {
-          console.warn("Registro inválido encontrado e ignorado:", row);
+        console.log("Linha lida do CSV:", row);
+
+        try {
+          // Normaliza os valores
+          const name = row["name"]?.trim();
+          const age = row["age"]?.trim();
+          const email = row["email"]?.trim();
+
+          if (name && age && email) {
+            const recordKey = `${name}|${age}|${email}`;
+            if (!uniqueRecords.has(recordKey)) {
+              records.push({ name, age, email });
+              uniqueRecords.add(recordKey);
+            } else {
+              console.warn("Registro duplicado ignorado:", row);
+            }
+          } else {
+            console.warn("Registro inválido encontrado e ignorado:", row);
+          }
+        } catch (err) {
+          console.warn("Erro ao processar registro:", row, err);
         }
       })
       .on("end", async () => {
         if (records.length === 0) {
-          // Nenhum dado válido foi encontrado no CSV
           fs.unlinkSync(req.file.path);
           return res
             .status(400)
@@ -41,10 +58,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         }
 
         try {
-          // Insere os registros no banco de dados
           await Person.bulkCreate(records);
-
-          // Remove o arquivo após o processamento
           fs.unlinkSync(req.file.path);
 
           res
@@ -62,5 +76,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     res.status(500).json({ error: "Erro ao processar o arquivo CSV." });
   }
 });
+
+module.exports = router;
 
 module.exports = router;
